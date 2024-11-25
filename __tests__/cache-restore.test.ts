@@ -8,15 +8,16 @@ import {PackageManagerInfo} from '../src/package-managers';
 
 describe('restoreCache', () => {
   //Arrange
-  let hashFilesSpy = jest.spyOn(glob, 'hashFiles');
-  let getCacheDirectoryPathSpy = jest.spyOn(
+  const hashFilesSpy = jest.spyOn(glob, 'hashFiles');
+  const getCacheDirectoryPathSpy = jest.spyOn(
     cacheUtils,
     'getCacheDirectoryPath'
   );
-  let restoreCacheSpy = jest.spyOn(cache, 'restoreCache');
-  let infoSpy = jest.spyOn(core, 'info');
-  let setOutputSpy = jest.spyOn(core, 'setOutput');
+  const restoreCacheSpy = jest.spyOn(cache, 'restoreCache');
+  const infoSpy = jest.spyOn(core, 'info');
+  const setOutputSpy = jest.spyOn(core, 'setOutput');
 
+  const versionSpec = '1.13.1';
   const packageManager = 'default';
   const cacheDependencyPath = 'path';
 
@@ -39,9 +40,13 @@ describe('restoreCache', () => {
     });
 
     //Act + Assert
-    expect(async () => {
-      await cacheRestore.restoreCache(packageManager, cacheDependencyPath);
-    }).rejects.toThrowError(
+    await expect(async () => {
+      await cacheRestore.restoreCache(
+        versionSpec,
+        packageManager,
+        cacheDependencyPath
+      );
+    }).rejects.toThrow(
       'Some specified paths were not resolved, unable to cache dependencies.'
     );
   });
@@ -61,8 +66,12 @@ describe('restoreCache', () => {
     });
 
     //Act + Assert
-    await cacheRestore.restoreCache(packageManager, cacheDependencyPath);
-    expect(infoSpy).toBeCalledWith(`Cache is not found`);
+    await cacheRestore.restoreCache(
+      versionSpec,
+      packageManager,
+      cacheDependencyPath
+    );
+    expect(infoSpy).toHaveBeenCalledWith(`Cache is not found`);
   });
 
   it('should set output if cache hit is occured', async () => {
@@ -80,7 +89,11 @@ describe('restoreCache', () => {
     });
 
     //Act + Assert
-    await cacheRestore.restoreCache(packageManager, cacheDependencyPath);
-    expect(setOutputSpy).toBeCalledWith('cache-hit', true);
+    await cacheRestore.restoreCache(
+      versionSpec,
+      packageManager,
+      cacheDependencyPath
+    );
+    expect(setOutputSpy).toHaveBeenCalledWith('cache-hit', true);
   });
 });

@@ -4,9 +4,10 @@ import * as installer from './installer';
 import * as semver from 'semver';
 import path from 'path';
 import {restoreCache} from './cache-restore';
-import {isGhes, isCacheFeatureAvailable} from './cache-utils';
+import {isCacheFeatureAvailable} from './cache-utils';
 import cp from 'child_process';
 import fs from 'fs';
+import os from 'os';
 
 export async function run() {
   try {
@@ -19,32 +20,62 @@ export async function run() {
     const cache = core.getBooleanInput('cache');
     core.info(`Setup go version spec ${versionSpec}`);
 
+    let arch = core.getInput('architecture');
+
+    if (!arch) {
+      arch = os.arch();
+    }
+
     if (versionSpec) {
-      let token = core.getInput('token');
-      let auth = !token || isGhes() ? undefined : `token ${token}`;
+      const token = core.getInput('token');
+      const auth = !token ? undefined : `token ${token}`;
 
       const checkLatest = core.getBooleanInput('check-latest');
-      const installDir = await installer.getGo(versionSpec, checkLatest, auth);
+
+      const installDir = await installer.getGo(
+        versionSpec,
+        checkLatest,
+        auth,
+        arch
+      );
+
+      const installDirVersion = path.basename(path.dirname(installDir));
 
       core.addPath(path.join(installDir, 'bin'));
       core.info('Added go to the path');
 
-      const version = installer.makeSemver(versionSpec);
+      const version = installer.makeSemver(installDirVersion);
       // Go versions less than 1.9 require GOROOT to be set
       if (semver.lt(version, '1.9.0')) {
         core.info('Setting GOROOT for Go version < 1.9');
         core.exportVariable('GOROOT', installDir);
       }
 
-      let added = await addBinToPath();
-      core.debug(`add bin ${added}`);
       core.info(`Successfully set up Go version ${versionSpec}`);
+    } else {
+      core.info(
+        '[warning]go-version input was not specified. The action will try to use pre-installed version.'
+      );
     }
+
+    const added = await addBinToPath();
+    core.debug(`add bin ${added}`);
+
+    const goPath = await io.which('go');
+    const goVersion = (cp.execSync(`${goPath} version`) || '').toString();
 
     if (cache && isCacheFeatureAvailable()) {
       const packageManager = 'default';
       const cacheDependencyPath = core.getInput('cache-dependency-path');
-      await restoreCache(packageManager, cacheDependencyPath);
+      try {
+        await restoreCache(
+          parseGoVersion(goVersion),
+          packageManager,
+          cacheDependencyPath
+        );
+      } catch (error) {
+        core.warning(`Restore cache failed: ${(error as Error).message}`);
+      }
     }
 
     // add problem matchers
@@ -52,33 +83,31 @@ export async function run() {
     core.info(`##[add-matcher]${matchersPath}`);
 
     // output the version actually being used
-    let goPath = await io.which('go');
-    let goVersion = (cp.execSync(`${goPath} version`) || '').toString();
     core.info(goVersion);
 
     core.setOutput('go-version', parseGoVersion(goVersion));
 
     core.startGroup('go env');
-    let goEnv = (cp.execSync(`${goPath} env`) || '').toString();
+    const goEnv = (cp.execSync(`${goPath} env`) || '').toString();
     core.info(goEnv);
     core.endGroup();
   } catch (error) {
-    core.setFailed(error.message);
+    core.setFailed((error as Error).message);
   }
 }
 
 export async function addBinToPath(): Promise<boolean> {
   let added = false;
-  let g = await io.which('go');
+  const g = await io.which('go');
   core.debug(`which go :${g}:`);
   if (!g) {
     core.debug('go not in the path');
     return added;
   }
 
-  let buf = cp.execSync('go env GOPATH');
+  const buf = cp.execSync('go env GOPATH');
   if (buf.length > 1) {
-    let gp = buf.toString().trim();
+    const gp = buf.toString().trim();
     core.debug(`go env GOPATH :${gp}:`);
     if (!fs.existsSync(gp)) {
       // some of the hosted images have go install but not profile dir
@@ -86,7 +115,7 @@ export async function addBinToPath(): Promise<boolean> {
       await io.mkdirP(gp);
     }
 
-    let bp = path.join(gp, 'bin');
+    const bp = path.join(gp, 'bin');
     if (!fs.existsSync(bp)) {
       core.debug(`creating ${bp}`);
       await io.mkdirP(bp);
