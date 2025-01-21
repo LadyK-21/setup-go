@@ -34,42 +34,58 @@ export const getPackageManagerInfo = async (packageManager: string) => {
 export const getCacheDirectoryPath = async (
   packageManagerInfo: PackageManagerInfo
 ) => {
-  let pathList = await Promise.all(
-    packageManagerInfo.cacheFolderCommandList.map(command =>
+  const pathOutputs = await Promise.allSettled(
+    packageManagerInfo.cacheFolderCommandList.map(async command =>
       getCommandOutput(command)
     )
   );
 
-  const emptyPaths = pathList.filter(item => !item);
+  const results = pathOutputs.map(item => {
+    if (item.status === 'fulfilled') {
+      return item.value;
+    } else {
+      core.info(`[warning]getting cache directory path failed: ${item.reason}`);
+    }
 
-  if (emptyPaths.length) {
+    return '';
+  });
+
+  const cachePaths = results.filter(item => item);
+
+  if (!cachePaths.length) {
     throw new Error(`Could not get cache folder paths.`);
   }
 
-  return pathList;
+  return cachePaths;
 };
 
 export function isGhes(): boolean {
   const ghUrl = new URL(
     process.env['GITHUB_SERVER_URL'] || 'https://github.com'
   );
-  return ghUrl.hostname.toUpperCase() !== 'GITHUB.COM';
+
+  const hostname = ghUrl.hostname.trimEnd().toUpperCase();
+  const isGitHubHost = hostname === 'GITHUB.COM';
+  const isGitHubEnterpriseCloudHost = hostname.endsWith('.GHE.COM');
+  const isLocalHost = hostname.endsWith('.LOCALHOST');
+
+  return !isGitHubHost && !isGitHubEnterpriseCloudHost && !isLocalHost;
 }
 
 export function isCacheFeatureAvailable(): boolean {
-  if (!cache.isFeatureAvailable()) {
-    if (isGhes()) {
-      throw new Error(
-        'Cache action is only supported on GHES version >= 3.5. If you are on version >=3.5 Please check with GHES admin if Actions cache service is enabled or not.'
-      );
-    } else {
-      core.warning(
-        'The runner was not able to contact the cache service. Caching will be skipped'
-      );
-    }
+  if (cache.isFeatureAvailable()) {
+    return true;
+  }
 
+  if (isGhes()) {
+    core.warning(
+      'Cache action is only supported on GHES version >= 3.5. If you are on version >=3.5 Please check with GHES admin if Actions cache service is enabled or not.'
+    );
     return false;
   }
 
-  return true;
+  core.warning(
+    'The runner was not able to contact the cache service. Caching will be skipped'
+  );
+  return false;
 }
